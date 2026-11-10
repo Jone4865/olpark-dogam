@@ -1,0 +1,16 @@
+{
+  "name": "올팍 도감",
+  "short_name": "올팍 도감",
+  "description": "올림픽공원 9경과 생태 공간을 찾아가 사진을 찍고 카드와 배지를 모아요.",
+  "lang": "ko",
+  "start_url": "./#/map",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#22663F",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
