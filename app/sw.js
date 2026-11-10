@@ -1,5 +1,5 @@
 // 올팍 도감 서비스 워커: 앱 화면과 데이터를 저장해 두어 신호가 약한 곳에서도 열리게 한다.
-const VERSION = 'olpark-v1.0.0';
+const VERSION = 'olpark-v1.1.0';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'data/places.json', 'data/roses.json', 'data/basemap.json', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 const IMG_CACHE = 'olpark-img';
 const IMG_MAX = 150;

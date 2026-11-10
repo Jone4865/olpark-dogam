@@ -1,6 +1,6 @@
 // 올팍 도감: 올림픽공원 9경과 생태 공간에서 사진을 찍어 카드와 배지를 모으는 웹앱
 // 서버 없이 동작한다. 사진과 기록은 이 기기의 IndexedDB에만 저장한다.
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -114,15 +114,20 @@ async function photoURL(id) {
   urls.set(id, u);
   return u;
 }
-async function loadState() {
-  const photos = await db.all('photos');
-  state.photos = photos.map(({ blob, ...m }) => m).sort((a, b) => a.takenAt.localeCompare(b.takenAt));
-  state.roses = new Map((await db.all('roses')).map((r) => [r.name, r]));
-}
 const ls = {
   get(k, d) { try { const v = localStorage.getItem('olpark.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('olpark.' + k, JSON.stringify(v)); } catch { /* 저장 못 해도 동작에는 지장 없음 */ } },
 };
+// 체험 모드: 공원 밖에서도 장소를 골라 카드를 받아 본다. 체험 기록은 실제 기록과 따로 보인다.
+const demoOn = () => ls.get('demo', false);
+async function loadState() {
+  const demo = demoOn();
+  const photos = await db.all('photos');
+  state.photos = photos.map(({ blob, ...m }) => m).filter((p) => !!p.demo === demo).sort((a, b) => a.takenAt.localeCompare(b.takenAt));
+  state.roses = new Map((await db.all('roses')).filter((r) => !!r.demo === demo).map((r) => [r.rose || r.name, r]));
+}
+async function setDemo(on) { ls.set('demo', on); await loadState(); }
+const currentBadge = () => { const m = location.hash.match(/^#\/place\/([\w-]+)/); return m ? m[1] : null; };
 
 // ---------- 진행도 ----------
 const spotPhotos = (sid) => state.photos.filter((p) => p.spot === sid);
@@ -248,12 +253,14 @@ function viewStart() {
     <div class="actions">
       <button class="btn" id="start-geo">${ICON.pin}위치 허용하고 시작하기</button>
       <a class="btn ghost" href="#/map" id="start-browse">위치 없이 둘러보기</a>
+      <a class="btn ghost" href="#/map" id="start-demo" style="min-height:40px;font-size:14px">공원 밖에서 체험해 보기 (체험 모드)</a>
       <p class="tiny muted" style="text-align:center">공공데이터: 한국체육산업개발(주) · 지도 © OpenStreetMap contributors</p>
     </div>
   </section>`;
   bindCommon(view());
   $('#start-geo').addEventListener('click', () => { ls.set('started', true); startGeo(); location.hash = '#/map'; });
   $('#start-browse').addEventListener('click', () => ls.set('started', true));
+  $('#start-demo').addEventListener('click', async (e) => { e.preventDefault(); ls.set('started', true); await setDemo(true); location.hash = '#/map'; });
 }
 
 // ---------- 화면: 지도 ----------
@@ -305,6 +312,7 @@ function viewMap() {
     <div class="stat"><span>배지</span><strong>${done} <small>/ ${P.badges.length}</small></strong></div>
     <div class="stat"><span>모은 카드</span><strong>${cardCount()}<small>장</small></strong></div>
   </section>
+  ${demoOn() ? `<div style="padding:0 20px 12px"><div class="notice green" role="note">${ICON.info}<span><strong>체험 모드예요.</strong> 지도에서 장소를 누르고 장소 화면의 사진 찍기를 누르면 위치 확인 없이 카드를 받아 볼 수 있어요. 체험 기록은 실제 기록과 따로 저장돼요. <a href="#" id="demo-off" style="font-weight:700">체험 끝내기</a></span></div></div>` : ''}
   ${isIOS() && !isStandalone() && !ls.get('iosHintClosed', false) ? `<div style="padding:0 20px 12px"><div class="notice" role="note">${ICON.info}<span>홈 화면에 추가하면 기록이 지워지지 않아요. <a href="#" data-act="home-help" style="font-weight:700;color:var(--orange-text)">추가하는 법</a> · <a href="#" id="ios-close" style="color:var(--orange-text)">닫기</a></span></div></div>` : ''}
   <section class="map-box ${zoom ? 'zoom' : ''}" aria-label="올림픽공원 지도">
     <div class="map-tools">
@@ -324,6 +332,7 @@ function viewMap() {
   <button class="fab" data-act="capture">${ICON.camera}사진 찍기</button>`;
   bindCommon(view());
   $('#ios-close')?.addEventListener('click', (e) => { e.preventDefault(); ls.set('iosHintClosed', true); render(); });
+  $('#demo-off')?.addEventListener('click', async (e) => { e.preventDefault(); await setDemo(false); toast('체험 모드를 껐어요. 실제 기록으로 돌아왔어요.'); render(); });
   $('#zoom').addEventListener('click', () => { ls.set('zoom', !zoom); render(); if (!zoom) setTimeout(centerOnMe, 30); });
   $('#locate').addEventListener('click', () => { if (!state.geoOn) startGeo(); if (!ls.get('zoom', false)) { ls.set('zoom', true); render(); } setTimeout(centerOnMe, 30); });
   if (state.geoOn) startGeo();
@@ -419,6 +428,16 @@ async function fillThumbs(root = view()) {
 
 // ---------- 촬영 ----------
 function capture() {
+  if (demoOn()) {
+    const b = badgeById.get(currentBadge());
+    if (!b) return toast('체험 모드에서는 장소 화면에서 사진 찍기를 눌러 주세요. 지도에서 번호나 점을 누르면 장소 화면이 열려요.', 4500);
+    const list = (b.id === 't_walk' ? [WALK()] : b.spots.map((id) => spotById.get(id))).map((s) => ({ spot: s, d: 0 }));
+    state.pending = { list, season: nowSeason() };
+    const cam = $('#cam');
+    cam.value = '';
+    cam.click();
+    return;
+  }
   if (!state.geoOn) { startGeo(); toast('위치를 켜는 중이에요. 위치가 확인되면 다시 눌러 주세요.'); render(); return; }
   const c = candidates();
   if (c.status === 'error') return toast(state.geoErr);
@@ -475,6 +494,7 @@ async function savePhoto(spot, img, season) {
   const before = new Set(doneBadges());
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const rec = { id, spot: spot.id, badge: spot.badge, season, takenAt: new Date().toISOString(), w: img.w, h: img.h, quiz: spot.badge === 'v9' ? 'open' : '' };
+  if (demoOn()) rec.demo = true;
   try { await db.put('photos', { ...rec, blob: img.blob }); } catch { toast('저장 공간이 부족해서 저장하지 못했어요.'); return; }
   state.photos.push(rec);
   state.justEarned = doneBadges().filter((x) => !before.has(x));
@@ -495,7 +515,7 @@ async function viewCard(id, isNew) {
   <section class="card-page">
     <div style="text-align:center"><p style="font-size:14px;color:#D5E8DA">${esc(b.name)}</p><h1>${isNew ? '새 카드를 받았어요' : '내 카드'}</h1></div>
     <article class="card">
-      <div class="photo"><img id="card-img" alt="${esc(s.name)}에서 찍은 사진"><span class="season">${rec.season}</span></div>
+      <div class="photo"><img id="card-img" alt="${esc(s.name)}에서 찍은 사진"><span class="season">${rec.season}</span>${rec.demo ? '<span class="season" style="left:auto;right:10px;background:var(--green)">체험</span>' : ''}</div>
       <div class="meta"><h2>${esc(b.spots.length > 1 ? s.name : badgeTitle(b))}의 ${rec.season}</h2><span class="small muted">${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}</span></div>
       ${then ? `<div class="then"><img src="${esc(then.url)}" alt="${esc(then.title)}" loading="lazy" referrerpolicy="no-referrer"><span class="small"><strong>그때 사진</strong><br><span class="muted">${esc(then.title)}${then.date ? ` · ${then.date.slice(0, 4)}년 공원 갤러리` : ''}</span></span></div>` : ''}
     </article>
@@ -551,7 +571,11 @@ function roseQuiz(rec) {
       rec.quiz = ok ? 'right' : 'wrong';
       const full = await db.get('photos', rec.id);
       if (full) await db.put('photos', { ...full, quiz: rec.quiz });
-      if (ok) { const r = { name: answer.name, at: new Date().toISOString(), photo: rec.id }; await db.put('roses', r); state.roses.set(r.name, r); }
+      if (ok) {
+        // 저장 키(name)는 체험 기록과 겹치지 않게 나누고, 실제 장미 이름은 rose에 둔다
+        const r = { name: (rec.demo ? 'demo:' : '') + answer.name, rose: answer.name, at: new Date().toISOString(), photo: rec.id, ...(rec.demo ? { demo: true } : {}) };
+        await db.put('roses', r); state.roses.set(answer.name, r);
+      }
       $('#quiz-close', m).textContent = '확인';
       m.querySelector('h2').textContent = ok ? `정답! ${answer.name} 카드를 받았어요` : `아쉬워요. 정답은 ${iyeyo(answer.name)}`;
       $('#quiz-close', m).addEventListener('click', () => render(), { once: true });
@@ -602,12 +626,14 @@ function viewSettings() {
     <button class="row" data-act="home-help">홈 화면에 추가하는 법 ${ICON.chev}</button>
     <a href="#/check">위치 점검 모드 ${ICON.chev}</a>
     <button class="row" id="geo-toggle">${state.geoOn ? '위치 끄기' : '위치 켜기'} ${ICON.chev}</button>
+    <button class="row" id="demo-toggle">${demoOn() ? '체험 모드 끄기' : '체험 모드 켜기 (공원 밖에서 둘러보기)'} ${ICON.chev}</button>
   </div></section>
   <section class="section"><h2>데이터 출처</h2><ul class="sources" style="margin:0;padding-left:18px">${P.sources.map((s) => `<li>${esc(s.name)} · ${esc(s.by)} · ${esc(s.license)}</li>`).join('')}</ul>
     <p class="small muted">사진은 서버로 보내지 않아요. 위치는 장소 확인에만 쓰고 저장하지 않아요.</p></section>
   <section class="section"><h2>기록 지우기</h2><button class="btn secondary" id="wipe" style="color:#9A3D06">이 폰의 기록 모두 지우기</button><p class="tiny muted">올팍 도감 ${VERSION}</p></section>`;
   bindCommon(view());
   $('#backup').addEventListener('click', backup);
+  $('#demo-toggle').addEventListener('click', async () => { const on = !demoOn(); await setDemo(on); toast(on ? '체험 모드를 켰어요. 장소 화면에서 위치 확인 없이 카드를 받아 볼 수 있어요.' : '체험 모드를 껐어요.'); render(); });
   $('#restore').addEventListener('click', () => $('#restore-file').click());
   $('#geo-toggle').addEventListener('click', () => {
     if (state.geoOn) { navigator.geolocation.clearWatch(state.watchId); state.watchId = null; state.geoOn = false; state.fix = null; ls.set('geo', false); } else startGeo();
@@ -623,7 +649,7 @@ function viewSettings() {
 const b64 = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.readAsDataURL(blob); });
 async function makeBackup() {
   const photos = await db.all('photos');
-  return { app: 'olpark', v: 1, exportedAt: new Date().toISOString(), photos: await Promise.all(photos.map(async ({ blob, ...m }) => ({ ...m, jpg: blob ? await b64(blob) : '' }))), roses: [...state.roses.values()] };
+  return { app: 'olpark', v: 1, exportedAt: new Date().toISOString(), photos: await Promise.all(photos.map(async ({ blob, ...m }) => ({ ...m, jpg: blob ? await b64(blob) : '' }))), roses: await db.all('roses') };
 }
 async function backup() {
   const data = await makeBackup();
@@ -646,7 +672,7 @@ async function restore(file) {
       const { jpg, ...m } = p;
       await db.put('photos', { ...m, blob: new Blob([bin], { type: 'image/jpeg' }) }); n++;
     }
-    for (const r of data.roses || []) if (ROSES.some((x) => x.name === r.name)) await db.put('roses', r);
+    for (const r of data.roses || []) if (ROSES.some((x) => x.name === (r.rose || r.name))) await db.put('roses', r);
     await loadState();
     toast(`사진 ${n}장과 장미 카드 ${(data.roses || []).length}장을 불러왔어요.`);
     render();
@@ -744,4 +770,4 @@ async function main() {
 }
 main();
 // 시험 도구
-window.__olpark = { state, candidates, distToSpot, db, P: () => P, ROSES: () => ROSES, savePhoto, shrink, render, makeBackup, restore, loadState, cardCount };
+window.__olpark = { state, candidates, distToSpot, db, P: () => P, ROSES: () => ROSES, savePhoto, shrink, render, makeBackup, restore, loadState, cardCount, setDemo };

@@ -98,6 +98,19 @@ try {
   results.backupRestore = await ev(`const o=window.__olpark; const data=await o.makeBackup(); const size=JSON.stringify(data).length;
     await o.db.clear('photos'); await o.db.clear('roses'); await o.loadState(); const wiped=o.state.photos.length;
     await o.restore(new File([JSON.stringify(data)],'b.json',{type:'application/json'})); return {size, wiped, after:o.state.photos.length, roses:o.state.roses.size}`);
+  // 체험 모드: 공원 밖에서 장소 화면의 사진 찍기로 카드 받기, 끄면 실제 기록으로 돌아오기
+  await setGeo(37.5050, 127.1000, 10); await sleep(800);
+  const realCount = await ev('return window.__olpark.state.photos.length');
+  await ev("location.hash='#/settings'"); await sleep(800); await tap('#demo-toggle'); await sleep(800);
+  await ev("location.hash='#/map'"); await sleep(1200); await shot('17_demo_map.png');
+  await ev("location.hash='#/place/v3'"); await sleep(1500);
+  await tap('.cta-bar [data-act="capture"]'); await pickPhoto(); await sleep(1500);
+  await shot('18_demo_choose.png');
+  await tap('#choose button[type="submit"]'); await sleep(1800);
+  await shot('19_demo_card.png');
+  results.demo = await ev("const o=window.__olpark; return {hash:location.hash, demoPhotos:o.state.photos.length, chip:!!document.querySelector('.card .season + .season')}");
+  await ev("location.hash='#/settings'"); await sleep(800); await tap('#demo-toggle'); await sleep(800);
+  results.demoOff = await ev(`return {real: window.__olpark.state.photos.length, expected: ${realCount}}`);
   results.roses = await ev('return window.__olpark.state.roses.size');
   results.imgErrors = await ev("return [...document.images].filter(i=>i.complete&&i.naturalWidth===0&&i.src).map(i=>i.src).slice(0,5)");
 } catch (e) { results.error = e.message; }
